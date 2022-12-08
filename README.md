@@ -1,5 +1,7 @@
 # py-functils
 
+This is a module that aime to store usefull functions
+
 ## Installation
 
 ```shell
