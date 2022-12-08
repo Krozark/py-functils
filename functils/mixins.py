@@ -1,3 +1,4 @@
+# Built-in
 import os
 import re
 from logging import getLogger
@@ -37,7 +38,7 @@ class _FromDictMixin:
                     v = os.getenv(match.group("var_name"), match.group("default"))
             if hasattr(self, f"set_{k}"):
                 # has set_XXX(), then call it
-                func = getattr(self, f"set_{k}")  # type: ignore
+                func = getattr(self, f"set_{k}")
                 func(v)
             elif hasattr(self, k):
                 # has XXX, then set it

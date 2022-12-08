@@ -16,9 +16,9 @@ import requests
 logger = getLogger(__name__)
 
 
-def _get_attachment_file_nameand_type(path: str) -> Tuple[str, str]:
+def _get_attachment_file_nameand_type(path: str, regex: str) -> Tuple[str, str]:
     base_name = os.path.basename(os.path.basename(path))
-    name = re.match(EMAIL_ATTACHMENT_REGEX_TEMPLATE_FILE_NAME, base_name).group("name")  # type: ignore
+    name = re.match(regex, base_name).group("name")
     t = name.rsplit(".", 1)[-1]
     return name, t
 
@@ -32,6 +32,7 @@ def send_smtp_mail(
     body: str,
     html: str = None,
     attachments: List[Tuple[str, str]] = None,
+    attachments_regex: str = None,
     local_hostname: str = None,
     password: str = None,
 ) -> None:
@@ -69,7 +70,9 @@ def send_smtp_mail(
             msg_alternative.attach(MIMEText(html, "html"))  # Add html contents
 
         for attachment_path, attachment_data in attachments or []:  # add attachments
-            name, subtype = _get_attachment_file_nameand_type(attachment_path)
+            name, subtype = _get_attachment_file_nameand_type(
+                attachment_path, attachments_regex
+            )
             attachment = MIMEApplication(attachment_data, name=name, _subtype=subtype)
             attachment["Content-Disposition"] = f'attachment;filename="{name}"'
             msg_root.attach(attachment)
@@ -89,6 +92,7 @@ def send_mailgun_email(
     body: str,
     html: str = None,
     attachments: List[Tuple[str, str]] = None,
+    attachments_regex: str = None,
 ) -> None:
     logger.info(f"Preparing mailgun e-mail to {receivers}:")
     url = urljoin(url, domain + "/messages")
@@ -97,7 +101,9 @@ def send_mailgun_email(
         (
             "attachment",
             (
-                _get_attachment_file_nameand_type(attachment_path)[0],
+                _get_attachment_file_nameand_type(attachment_path, attachments_regex)[
+                    0
+                ],
                 attachment_data,
             ),
         )

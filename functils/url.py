@@ -5,7 +5,7 @@ import base64
 import magic
 
 
-def datauri(stream) -> str:
+def datauri(stream) -> str:  # type: ignore
     data = stream.read()
     detected = magic.detect_from_content(data)
     encoded_base64 = base64.b64encode(data)  # return bytes
