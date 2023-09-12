@@ -1,11 +1,11 @@
-# py-functils
+# krozark-funcutils
 
 This is a module that aime to store usefull functions
 
 ## Installation
 
 ```shell
-pip install -U .
+pip install -U krozark-funcutils
 ```
 
 ## Developement
