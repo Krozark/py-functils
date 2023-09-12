@@ -26,6 +26,10 @@ class _FromDictMixin:
 
     fields_required: List[Union[str, Tuple]] = []
 
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.from_dict(kwargs)
+
     def from_dict(self, d: dict, current_depth: str = "") -> None:
         for k, v in d.items():
             if isinstance(v, str):
