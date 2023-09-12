@@ -76,5 +76,13 @@ class _FromDictMixin:
             logger.error(msg)
             raise ValueError(msg)
 
+    def to_dict(self):
+        class_vars = vars(self.__class__)  # get any "default" attrs defined at the class level
+        inst_vars = vars(self)  # get any attrs defined on the instance (self)
+        all_vars = dict(class_vars)
+        all_vars.update(inst_vars)
+        # filter out private attributes
+        return {k: v for k, v in all_vars.items() if not k.startswith('_')}
+
     def __repr__(self) -> str:
-        return str(self.__dict__)
+        return str(self.to_dict())
