@@ -3,7 +3,7 @@ import os
 import re
 from logging import getLogger
 from typing import List, Tuple, Union
-
+import warnings
 logger = getLogger(__name__)
 
 
@@ -16,11 +16,15 @@ class _FromDictMixin:
         field3 = "default3"
         fields_required = ["field1", ("field2", "field3)] # field 1 is required, and at least one of field2 or field3
 
-        def set_field1(self, value): # optional
-           # make some check
+        def from_dict_field1(self, value): # optional
+           # make some check / transform the value
            self.field1 = value
 
-        def validate(self, current_depth=""): # thi si is optional
+        def to_dict_field1(self): # optional
+            # return the representation of field1
+            return value
+
+        def validate(self, current_depth=""): # this is optional
             # place your code de validate all field
     """
 
@@ -31,6 +35,10 @@ class _FromDictMixin:
         self.from_dict(kwargs)
 
     def from_dict(self, d: dict, current_depth: str = "") -> None:
+        """
+        Load object from dict.
+        Values can be a natif value, a environ "env(name)"
+        """
         for k, v in d.items():
             if isinstance(v, str):
                 pattern = r"env\((?P<var_name>[A-Z_]+)(\s*,\s*(?P<default>[\w.-]+))?\)"
@@ -40,8 +48,13 @@ class _FromDictMixin:
                         "key %s is an env var. Getting it" % current_depth + "." + k
                     )
                     v = os.getenv(match.group("var_name"), match.group("default"))
-            if hasattr(self, f"set_{k}"):
+            if hasattr(self, f"from_dict_{k}"):
+                # has from_dict_XXX(), then call it
+                func = getattr(self, f"from_dict_{k}")
+                func(v)
+            elif hasattr(self, f"set_{k}"):
                 # has set_XXX(), then call it
+                warnings.warn("set_XXX is deprecated. Please use from_dict_XXX instead", DeprecationWarning, stacklevel=2)
                 func = getattr(self, f"set_{k}")
                 func(v)
             elif hasattr(self, k):
@@ -85,8 +98,24 @@ class _FromDictMixin:
         inst_vars = vars(self)  # get any attrs defined on the instance (self)
         all_vars = dict(class_vars)
         all_vars.update(inst_vars)
-        # filter out private attributes
-        return {k: v for k, v in all_vars.items() if not k.startswith('_')}
+
+        result = {}
+        for k, v in all_vars.items():
+            # filter out private attributes and callable
+            if k.startswith('_') or callable(getattr(self, k)):
+                continue
+
+            if hasattr(self, f"to_dict_{k}"):
+                # has to_dict_XXX(), then call it
+                func = getattr(self, f"to_dict_{k}")
+                result[k] = func()
+            elif isinstance(v, _FromDictMixin):
+                result[k] = v.to_dict()
+            # elif isinstance(v, (list, tuple)) and isinstance(v[0], _FromDictMixin):
+            #     result[k] = [v2.to_dict() for v2 in v]
+            else:
+                result[k] = v
+        return result
 
     def __repr__(self) -> str:
         return str(self.to_dict())
