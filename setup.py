@@ -1,15 +1,16 @@
 # Third-party
-from setuptools import find_packages, setup
 import os
+
+from setuptools import find_packages, setup
 
 
 def read(fname):
-   return open(os.path.join(os.path.dirname(__file__), fname)).read()
+    return open(os.path.join(os.path.dirname(__file__), fname)).read()
 
 
 setup(
     name="krozark-functils",
-    version="0.1.2",
+    version="0.1.3",
     packages=find_packages(exclude=["tests"]),
     install_requires=["requests", "types-requests", "jinja2", "file-magic==0.4.*"],
     description='The aim of this project is to group some usefull python class',
