@@ -7,7 +7,15 @@ from django.utils.functional import partition
 
 
 class BulkCreateQuerySet(QuerySet):
-    def bulk_create(self, objs, batch_size=None, ignore_conflicts=False, **kwargs):
+    def bulk_create(
+        self,
+        objs,
+        batch_size=None,
+        ignore_conflicts=False,
+        update_conflicts=False,
+        update_fields=None,
+        unique_fields=None,
+    ):
         """
         Inserts each of the instances into the database. This does *not* call
         save() on each of the instances, does not send any pre/post save
@@ -18,7 +26,8 @@ class BulkCreateQuerySet(QuerySet):
         # res = super().bulk_create(objs, batch_size=batch_size, **kwargs)
         # return res
 
-        assert batch_size is None or batch_size > 0
+        if batch_size is not None and batch_size <= 0:
+            raise ValueError("Batch size must be a positive integer.")
 
         first_ancestors = collections.OrderedDict()
         parents = collections.OrderedDict()
@@ -32,6 +41,7 @@ class BulkCreateQuerySet(QuerySet):
                         d[parent].append(field)
                     else:
                         d[parent] = [field]
+
         init_parent_dict(self.model._meta)
         is_subclassed = bool(first_ancestors) or bool(parents)
 
@@ -41,12 +51,19 @@ class BulkCreateQuerySet(QuerySet):
             if not connection.features.can_return_rows_from_bulk_insert:
                 raise ValueError("Can't bulk create a multi-table inherited model")
             if len(first_ancestors) > 1:
-                raise NotImplemented("Can't bulk create a multi-table inherited model with multiple pk ancestors")
+                raise NotImplemented(
+                    "Can't bulk create a multi-table inherited model with multiple pk ancestors"
+                )
             assert first_ancestors
 
         if not objs:
             return objs
-
+        on_conflict = self._check_bulk_create_options(
+            ignore_conflicts,
+            update_conflicts,
+            update_fields,
+            unique_fields,
+        )
         self._for_write = True
         opts = self.model._meta
         fields = opts.concrete_fields
@@ -55,9 +72,16 @@ class BulkCreateQuerySet(QuerySet):
         with transaction.atomic(using=self.db, savepoint=False):
             objs_with_pk, objs_without_pk = partition(lambda o: o.pk is None, objs)
             if objs_with_pk:
-                # block copied from https://github.com/django/django/blob/stable/3.2.x/django/db/models/query.py#L501
-                #self._batched_insert(objs_with_pk, fields, batch_size)
-                returned_columns = self._batched_insert(objs_with_pk, fields, batch_size, ignore_conflicts=ignore_conflicts)
+                # block copied from https://github.com/django/django/blob/stable/4.2.x/django/db/models/query.py#L786
+                # self._batched_insert(objs_with_pk, fields, batch_size)
+                returned_columns = self._batched_insert(
+                    objs_with_pk,
+                    fields,
+                    batch_size,
+                    on_conflict=on_conflict,
+                    update_fields=update_fields,
+                    unique_fields=unique_fields,
+                )
                 for obj_with_pk, results in zip(objs_with_pk, returned_columns):
                     for result, field in zip(results, opts.db_returning_fields):
                         if field != opts.pk:
@@ -67,12 +91,24 @@ class BulkCreateQuerySet(QuerySet):
                     obj_with_pk._state.db = self.db
             if objs_without_pk:
                 if not is_subclassed:
-                    # block copied from https://github.com/django/django/blob/stable/3.2.x/django/db/models/query.py#L512
+                    # block copied from https://github.com/django/django/blob/stable/4.2.x/django/db/models/query.py#801
                     fields = [f for f in fields if not isinstance(f, AutoField)]
-                    returned_columns = self._batched_insert(objs_without_pk, fields, batch_size, ignore_conflicts=ignore_conflicts)
-                    if connection.features.can_return_rows_from_bulk_insert and not ignore_conflicts:
+                    returned_columns = self._batched_insert(
+                        objs_without_pk,
+                        fields,
+                        batch_size,
+                        on_conflict=on_conflict,
+                        update_fields=update_fields,
+                        unique_fields=unique_fields,
+                    )
+                    if (
+                        connection.features.can_return_rows_from_bulk_insert
+                        and on_conflict is None
+                    ):
                         assert len(returned_columns) == len(objs_without_pk)
-                    for obj_without_pk, results in zip(objs_without_pk, returned_columns):
+                    for obj_without_pk, results in zip(
+                        objs_without_pk, returned_columns
+                    ):
                         for result, field in zip(results, opts.db_returning_fields):
                             setattr(obj_without_pk, field.attname, result)
                         obj_without_pk._state.adding = False
@@ -80,8 +116,19 @@ class BulkCreateQuerySet(QuerySet):
                 else:
                     # bulk create the parents with pk first
                     for parent, ptr_fields in first_ancestors.items():
-                        fields = [f for f in parent._meta.local_fields if not isinstance(f, AutoField)]
-                        ids = parent.objects.get_queryset()._batched_insert(objs_without_pk, fields, batch_size, ignore_conflicts=ignore_conflicts)
+                        fields = [
+                            f
+                            for f in parent._meta.local_fields
+                            if not isinstance(f, AutoField)
+                        ]
+                        ids = parent.objects.get_queryset()._batched_insert(
+                            objs_without_pk,
+                            fields,
+                            batch_size,
+                            on_conflict=on_conflict,
+                            update_fields=update_fields,
+                            unique_fields=unique_fields,
+                        )
                         assert len(ids) == len(objs_without_pk)
                         for obj, pk in zip(objs_without_pk, ids):
                             # set the obj.pk, created with the parent
@@ -92,7 +139,12 @@ class BulkCreateQuerySet(QuerySet):
                                 pk = pk[0]
                             setattr(obj, parent._meta.pk.attname, pk)
                             # create concrete parent object
-                            obj2 = parent(**{f.name: getattr(obj, f.name) for f in parent._meta.concrete_fields})
+                            obj2 = parent(
+                                **{
+                                    f.name: getattr(obj, f.name)
+                                    for f in parent._meta.concrete_fields
+                                }
+                            )
                             # also update pointer to parent fields
                             for f in ptr_fields:
                                 # <parent>_ptr_id fields
@@ -106,17 +158,38 @@ class BulkCreateQuerySet(QuerySet):
                     for parent, ptr_fields in parents.items():
                         # create with local fields
                         fields = parent._meta.local_fields  # no autofields (pk) here
-                        parent.objects.get_queryset()._batched_insert(objs_without_pk, fields, batch_size, ignore_conflicts=ignore_conflicts)
+                        parent.objects.get_queryset()._batched_insert(
+                            objs_without_pk,
+                            fields,
+                            batch_size,
+                            on_conflict=on_conflict,
+                            update_fields=update_fields,
+                            unique_fields=unique_fields,
+                        )
                         # update parent_ptr fields
                         for obj in objs_without_pk:
-                            obj2 = parent(**{f.name: getattr(obj, f.name) for f in parent._meta.concrete_fields})
+                            obj2 = parent(
+                                **{
+                                    f.name: getattr(obj, f.name)
+                                    for f in parent._meta.concrete_fields
+                                }
+                            )
                             for f in ptr_fields:
                                 setattr(obj, f.name, obj2)
                     fields = self.model._meta.local_fields  # no autofields (pk) here
-                    returned_columns = self._batched_insert(objs_without_pk, fields, batch_size, ignore_conflicts=ignore_conflicts)
+                    returned_columns = self._batched_insert(
+                        objs_without_pk,
+                        fields,
+                        batch_size,
+                        on_conflict=on_conflict,
+                        update_fields=update_fields,
+                        unique_fields=unique_fields,
+                    )
 
                     # finalize the objects
-                    for obj_without_pk, results in zip(objs_without_pk, returned_columns):
+                    for obj_without_pk, results in zip(
+                        objs_without_pk, returned_columns
+                    ):
                         for result, field in zip(results, opts.db_returning_fields):
                             setattr(obj_without_pk, field.attname, result)
                         obj_without_pk._state.adding = False
