@@ -1,4 +1,11 @@
-    
+import collections
+
+from django.db import connections, transaction
+from django.db.models.fields import AutoField
+from django.db.models.query import QuerySet
+from django.utils.functional import partition
+
+
 class BulkCreateQuerySet(QuerySet):
     def bulk_create(self, objs, batch_size=None, ignore_conflicts=False, **kwargs):
         """
