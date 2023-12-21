@@ -1,3 +1,14 @@
+__all__ = ["get_cache_name", "memorized_method"]
+
+
+def get_cache_name(func):
+    f = func
+    # deal with this function called on methode decorated with @memorized_method
+    if hasattr(func, "_wrapped_method"):
+        f = func._wrapped_method
+    return f"_cache_{f.__name__}"
+
+
 def memorized_method(func):
     """
     This decorator allow a user to cache a method call of an object (with no parameters).
@@ -23,10 +34,11 @@ def memorized_method(func):
     """
 
     def wrapper(obj, force=False):
-        cache_attr = f"_memorized_method_cache_{func.__name__}"
+        cache_attr = get_cache_name(func)
         if not hasattr(obj, cache_attr) or force:
             result = func(obj, force=force)
             setattr(obj, cache_attr, result)
         return getattr(obj, cache_attr)
 
+    wrapper._wrapped_method = func  # store original method
     return wrapper
