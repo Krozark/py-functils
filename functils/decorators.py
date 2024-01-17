@@ -25,31 +25,32 @@ class memorized_method:
     ```
     """
 
-    def __init__(self, cache_name=None):
-        self._cache_name = cache_name
+    def __init__(self, cache_key=None):
+        self._cache_key = cache_key
 
     def __call__(self, func):
-        if not self._cache_name:
-            self._cache_name = self.get_cache_name(func)
+        if not self._cache_key:
+            self._cache_key = self.get_cache_key(func)
 
-        def wrapper(obj, force=False):
-            if not hasattr(obj, self._cache_name) or force:
-                result = self.call_wrapped(obj, func, force=force)
-                setattr(obj, self._cache_name, result)
-            return getattr(obj, self._cache_name)
+        def wrapper(obj, *args, force=False, **kwargs):
+            if not hasattr(obj, self._cache_key) or force:
+                result = func(obj, *args, **kwargs)
+                setattr(obj, self._cache_key, result)
+            return getattr(obj, self._cache_key)
 
-        wrapper._cache_name = self._cache_name
+        wrapper._cache_key = self._cache_key
+
         return wrapper
 
     @staticmethod
-    def get_cache_name(func):
-        # deal with this function called on methode decorated with @memorized_method()
-        if hasattr(func, "_cache_name"):
-            return func._cache_name
-        return f"_cache_{func.__name__}"
+    def get_cache_key(func):
+        # deal with this function called on methode decorated with @cache()
+        if hasattr(func, "_cache_key"):
+            return func._cache_key
 
-    def call_wrapped(self, obj, func, *args, **kwargs):
-        """
-        helper for mock test that only wrappe the function to call
-        """
-        return func(obj, *args, **kwargs)
+        cache_key_prefix = "_cache"
+        cache_key_name = (
+            func.__name__[4:] if func.__name__.startswith("get_") else func.__name__
+        )
+
+        return "_".join([cache_key_prefix, cache_key_name])
